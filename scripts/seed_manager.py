@@ -625,6 +625,69 @@ def review(cfg: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Medium Suggestion (optional — requires `openai` library)
+# ---------------------------------------------------------------------------
+
+def _try_suggest_approaches(cfg: dict, seed_text: str) -> list[dict]:
+    """
+    Call the API to suggest 2-3 medium approaches for a seed.
+    Uses the config's suggest_model (should be a model that handles JSON well, e.g. deepseek).
+    Returns empty list if openai library isn't available or API call fails.
+    """
+    mediums = cfg.get("mediums", ["gallery", "moltbook", "blog", "audio"])
+    medium_list = json.dumps(mediums)
+    suggest_model = cfg.get("api", {}).get("suggest_model", cfg.get("api", {}).get("model", "deepseek-v4-flash"))
+
+    prompt = (
+        f"You are a creative director reviewing an artist's seed idea. "
+        f"Suggest 2-3 specific approaches from this medium list: {medium_list}. "
+        f"For each approach, give the medium, a one-line concept, and a key question. "
+        f"Be specific. Seed idea: \"{seed_text}\"\n\n"
+        f"Return ONLY a JSON array of objects with fields: medium, concept, question"
+    )
+
+    try:
+        from openai import OpenAI
+    except ImportError:
+        return []
+
+    try:
+        api_key = os.environ.get(cfg.get("api", {}).get("api_key_env", ""))
+        if not api_key:
+            return []
+        client = OpenAI(base_url=cfg["api"]["base_url"], api_key=api_key)
+        response = client.chat.completions.create(
+            model=suggest_model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7,
+            max_tokens=1024,
+        )
+        content = response.choices[0].message.content
+    except Exception:
+        return []
+
+    if not content or len(content.strip()) < 10:
+        return []
+
+    # Parse JSON from response (handle markdown-wrapped JSON)
+    import re
+    content = content.strip()
+    # Strip markdown code blocks
+    m = re.search(r"```(?:json)?\s*([\s\S]*?)```", content)
+    if m:
+        content = m.group(1).strip()
+    try:
+        import json as _json
+        approaches = _json.loads(content)
+        if isinstance(approaches, list):
+            return approaches[:3]
+    except Exception:
+        pass
+
+    return []
+
+
+# ---------------------------------------------------------------------------
 # Activate / Archive
 # ---------------------------------------------------------------------------
 
@@ -851,6 +914,11 @@ def main():
     # review
     p_review = sub.add_parser("review", help="Show seeds ready for activation review")
     _add_common_flags(p_review)
+    p_review.add_argument(
+        "--suggest",
+        action="store_true",
+        help="Generate AI-powered medium suggestions for each seed (requires openai lib)",
+    )
 
     # stats
     p_stats = sub.add_parser("stats", help="Seed statistics")
@@ -891,6 +959,13 @@ def main():
         result = extract(cfg, dry_run=args.dry_run, source=args.source)
     elif args.command == "review":
         result = review(cfg)
+        if args.suggest:
+            suggestions = {}
+            for s in result.get("reviewable", []):
+                approaches = _try_suggest_approaches(cfg, s["text"])
+                if approaches:
+                    suggestions[s["id"]] = approaches
+            result["suggestions"] = suggestions
     elif args.command == "stats":
         result = stats(cfg)
     elif args.command == "validate":
@@ -927,9 +1002,18 @@ def main():
     elif args.command == "review":
         reviewable = result.get("reviewable", [])
         stale = result.get("stale", [])
+        suggestions = result.get("suggestions", {})
         print(f"{len(reviewable)} seeds ready for review")
         for s in reviewable:
             print(f"  {s['id']} ({s['age_hours']}h) — {s['text'][:80]}")
+            if suggestions and s['id'] in suggestions:
+                for approach in suggestions[s['id']]:
+                    medium = approach.get("medium", "?")
+                    concept = approach.get("concept", "")
+                    q = approach.get("question", "")
+                    print(f"    → {medium}: {concept}")
+                    if q:
+                        print(f"      ? {q}")
         if stale:
             print(f"\n⚠ {len(stale)} STALE seeds (>{STALE_HOURS}h, force decision):")
             for s in stale:
