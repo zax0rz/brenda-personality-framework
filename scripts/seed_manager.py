@@ -39,6 +39,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -179,24 +180,239 @@ def _seed_id(text: str, source_path: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Prose extraction helpers
+# ---------------------------------------------------------------------------
+
+# Patterns that indicate seed-like content in prose
+_PROSE_PATTERNS = [
+    # "What if" / "Imagine" openings
+    (re.compile(r"^(?:what if|imagine)[\s,]", re.IGNORECASE), 0.85),
+    # "The [noun] of [noun]" metaphor pattern
+    (re.compile(r"^the\s+\w+\s+of\s+\w+", re.IGNORECASE), 0.80),
+    # Vivid metaphor/analogy markers
+    (re.compile(r"\b(?:like|as if|feels? like|smells? like|sounds? like|tastes? like)\b", re.IGNORECASE), 0.70),
+    # Sensory description — color/texture/light/sound words in clusters
+    (re.compile(r"\b(?:glow|glint|shimmer|haze|shadow|echo|silence|static|pulse|hum)\b", re.IGNORECASE), 0.65),
+    # Emotional insight / reflection markers
+    (re.compile(r"\b(?:i\s+(?:don'?t\s+know|wonder|carry|hold|feel|remember|forget|need|want))\b", re.IGNORECASE), 0.60),
+    # Vivid visual fragments — short lines with strong imagery
+    (re.compile(r"\b(?:neon|rust|chrome|dust|glass|bone|ash|smoke|rain|fog|amber|crimson|gold)\b", re.IGNORECASE), 0.55),
+    # Abstract philosophical fragments
+    (re.compile(r"\b(?:maybe|perhaps|somewhere|somehow|always|never|nothing|everything)\s+(?:that|this|we|they|it|he|she)\b", re.IGNORECASE), 0.55),
+]
+
+# Lines that are definitely NOT seeds
+_NOISE_PREFIXES = re.compile(
+    r"^(?:---\s*$|##\s|\*\s|\d+\.\s|\[\S+\]\(\S+\)|\[\^|!\[|>\s|```|\|\s)",
+    re.IGNORECASE,
+)
+
+# Lines that are pure narration/transitions — skip these
+_NARRATION_VERBS = ("said|told|walked|went|came|looked|sat|stood|nodded|smiled|frowned|laughed|cried|sighed|woke|fell|dropped|picked|put|got|took|turned|opened|closed|ran|drove")
+_NARRATION_PATTERN = re.compile(
+    r"^(?:he|she)\s+(?:" + _NARRATION_VERBS + r")"
+    r"|i\s+(?:woke|went|came|walked|drove|sat|stood|left|got|picked|put|took|turned|opened|closed|read|wrote|called|texted|checked)"
+    r"|zach\s+(?:said|told|found|showed|asked|told|left|came|went|called)"
+    r"|we\s+(?:went|came|sat|stood|walked|drove|talked|ate|drank|left|met)"
+    r"|they\s+(?:went|came|sat|stood|walked|left)",
+    re.IGNORECASE,
+)
+
+
+def _score_line(line: str) -> float:
+    """
+    Heuristic confidence score for a single line being a seed.
+    Returns 0.0–1.0. Lines scoring < 0.6 are discarded.
+    """
+    stripped = line.strip()
+
+    # Length gate: seeds are short fragments (20–200 chars)
+    if len(stripped) < 20 or len(stripped) > 200:
+        return 0.0
+
+    # Skip noise lines
+    if _NOISE_PREFIXES.match(stripped):
+        return 0.0
+
+    # Skip pure narration
+    if _NARRATION_PATTERN.match(stripped):
+        return 0.0
+
+    # Skip lines that are mostly whitespace or very short on content
+    words = stripped.split()
+    if len(words) < 4:
+        return 0.0
+
+    # Score: take the highest pattern match
+    best = 0.0
+    for pattern, base_score in _PROSE_PATTERNS:
+        if pattern.search(stripped):
+            best = max(best, base_score)
+
+    if best == 0.0:
+        return 0.0
+
+    # Boost: lines that end with ellipsis or em-dash feel more seed-like
+    if stripped.endswith("...") or stripped.endswith("…") or stripped.endswith("—"):
+        best = min(1.0, best + 0.05)
+
+    # Boost: lines containing a question mark
+    if "?" in stripped:
+        best = min(1.0, best + 0.05)
+
+    # Penalty: very long lines (150+) are probably prose, not seeds
+    if len(stripped) > 150:
+        best = max(0.0, best - 0.1)
+
+    return round(best, 2)
+
+
+def _parse_journal_md_entries(content: str) -> list[tuple[str, str]]:
+    """
+    Parse a journal.md file that contains inline entries separated by ---
+    and/or links to external journal files.
+
+    Returns list of (date_label, body_text) tuples.
+    """
+    entries = []
+    lines = content.split("\n")
+    current_body: list[str] = []
+    current_date = ""
+
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+
+        # Match date headers like "## 2026-04-29" or "## April 29, 2026"
+        date_match = re.match(r"^##\s+(\d{4}-\d{2}-\d{2}(?:\s+.*)?)", line)
+        if date_match:
+            # Flush previous entry
+            if current_body:
+                entries.append((current_date, "\n".join(current_body).strip()))
+                current_body = []
+            current_date = date_match.group(1).strip()
+            i += 1
+            continue
+
+        # Match separator --- (but not frontmatter delimiters at top)
+        if line.strip() == "---" and current_body:
+            entries.append((current_date, "\n".join(current_body).strip()))
+            current_body = []
+            i += 1
+            continue
+
+        # Match external links: [text](memory/journal/filename.md)
+        link_match = re.match(r"^\s*\[([^\]]*)\]\((memory/journal/[^)]+\.md)\)", line)
+        if link_match:
+            # This is a reference to an external file, skip it here
+            # The external file will be processed separately via journal_dir glob
+            i += 1
+            continue
+
+        current_body.append(line)
+        i += 1
+
+    # Flush last entry
+    if current_body:
+        entries.append((current_date, "\n".join(current_body).strip()))
+
+    return entries
+
+
+def _extract_prose_seeds(body_text: str, source_path: str) -> list[dict]:
+    """
+    Scan a journal entry's body text for seed-like fragments.
+    Returns a list of seed dicts (no id, no timestamps — caller fills those).
+    """
+    seeds = []
+    seen_texts: set[str] = set()
+
+    for line in body_text.split("\n"):
+        confidence = _score_line(line)
+        if confidence < 0.6:
+            continue
+
+        text = line.strip()
+        # Deduplicate within same entry
+        if text in seen_texts:
+            continue
+        seen_texts.add(text)
+
+        seeds.append({
+            "text": text,
+            "extraction_confidence": confidence,
+        })
+
+    return seeds
+
+
+def _make_seed_dict(text: str, source_type: str, source_path: str,
+                     emotional_tags: list[str], color: list[str] | None,
+                     sound: str, threads: list[str], now_fn,
+                     confidence: float | None = None) -> dict:
+    """Build a seed dict. Shared by all three extraction methods."""
+    seed = {
+        "id": _seed_id(text, source_path),
+        "text": text,
+        "created_at": now_fn(),
+        "source_type": source_type,
+        "source_path": source_path,
+        "emotional_tags": emotional_tags,
+        "color": color or [],
+        "sound": sound,
+        "threads": threads,
+        "status": "incubating",
+        "incubation_start": now_fn(),
+        "activation_date": None,
+        "archive_reason": None,
+        "medium_approaches": None,
+        "selected_medium": None,
+        "output_path": None,
+        "synthesis_source_entries": [],
+        "personality_alignment": None,
+    }
+    if confidence is not None:
+        seed["extraction_confidence"] = confidence
+    return seed
+
+
+# ---------------------------------------------------------------------------
 # Extract
 # ---------------------------------------------------------------------------
 
-def extract(cfg: dict, dry_run: bool = False) -> dict:
+def extract(cfg: dict, dry_run: bool = False, source: str = "all") -> dict:
     """
     Scan journal entries for seeds from three sources:
     1. Frontmatter `seed:` field (primary)
     2. Configurable section — e.g. `brewing`, `seeds`, `impulses` (secondary)
-    3. Raw journal text for seed-like fragments (tertiary, in the same configurable section)
+    3. Raw journal text for seed-like fragments (tertiary, heuristic)
+
+    Args:
+        cfg: Pipeline config dict.
+        dry_run: If True, don't write to seed file.
+        source: Which extraction methods to use. One of:
+            "all" — try all three methods
+            "frontmatter" — only YAML frontmatter seed: field
+            "brewing" — only the configurable section (brewing/seeds/impulses)
+            "prose" — only body text heuristics
     """
     seeds = _load_json(seeds_file(cfg))
     existing_ids = {s["id"] for s in seeds}
     new_seeds = []
     section_name = get_seed_section_name(cfg)
     jdir = journal_dir(cfg)
+    now_fn = lambda: _now(cfg)  # noqa: E731
 
     if not jdir.exists():
         return {"error": f"Journal directory not found: {jdir}"}
+
+    valid_sources = {"all", "frontmatter", "brewing", "prose"}
+    if source not in valid_sources:
+        return {"error": f"Invalid --source '{source}'. Must be one of: {', '.join(sorted(valid_sources))}"}
+
+    use_frontmatter = source in ("all", "frontmatter")
+    use_brewing = source in ("all", "brewing")
+    use_prose = source in ("all", "prose")
 
     for journal_file in sorted(jdir.glob("*.md")):
         content = journal_file.read_text()
@@ -220,74 +436,117 @@ def extract(cfg: dict, dry_run: bool = False) -> dict:
                 key, _, val = fl.partition(":")
                 fm[key.strip()] = val.strip().strip('"\'').strip("[]")
 
+        # Compute body text (everything after frontmatter)
+        body_start = 0
+        fm_count = 0
+        for idx, line in enumerate(lines):
+            if line.strip() == "---":
+                fm_count += 1
+                if fm_count == 2:
+                    body_start = idx + 1
+                    break
+        body_text = "\n".join(lines[body_start:]).strip()
+
+        source_path = f"{jdir.name}/{journal_file.name}"
+
         # Source 1: frontmatter seed field
-        if "seed" in fm and fm["seed"]:
+        if use_frontmatter and "seed" in fm and fm["seed"]:
             sid = _seed_id(fm["seed"], journal_file.name)
             if sid not in existing_ids:
-                seed = {
-                    "id": sid,
-                    "text": fm["seed"],
-                    "created_at": _now(cfg),
-                    "source_type": "journal_frontmatter",
-                    "source_path": f"{jdir.name}/{journal_file.name}",
-                    "emotional_tags": fm.get("mood", "").split(","),
-                    "color": fm.get("color", []),
-                    "sound": fm.get("sound", ""),
-                    "threads": fm.get("threads", "").split(","),
-                    "status": "incubating",
-                    "incubation_start": _now(cfg),
-                    "activation_date": None,
-                    "archive_reason": None,
-                    "medium_approaches": None,
-                    "selected_medium": None,
-                    "output_path": None,
-                    "synthesis_source_entries": [],
-                    "personality_alignment": None,
-                }
+                seed = _make_seed_dict(
+                    text=fm["seed"],
+                    source_type="journal_frontmatter",
+                    source_path=source_path,
+                    emotional_tags=fm.get("mood", "").split(","),
+                    color=fm.get("color", []),
+                    sound=fm.get("sound", ""),
+                    threads=fm.get("threads", "").split(","),
+                    now_fn=now_fn,
+                )
                 new_seeds.append(seed)
+                existing_ids.add(sid)
 
         # Source 2: configurable section (e.g. "brewing", "seeds", "impulses")
-        section_lines = []
-        in_section = False
-        section_header = f"## {section_name}"
-        for line in lines:
-            if line.strip().lower().startswith(section_header.lower()):
-                in_section = True
-                continue
-            if in_section and line.strip().startswith("## "):
-                break
-            if in_section and line.strip():
-                section_lines.append(line)
+        if use_brewing:
+            section_lines = []
+            in_section = False
+            section_header = f"## {section_name}"
+            for line in lines:
+                if line.strip().lower().startswith(section_header.lower()):
+                    in_section = True
+                    continue
+                if in_section and line.strip().startswith("## "):
+                    break
+                if in_section and line.strip():
+                    section_lines.append(line)
 
-        if section_lines:
-            section_text = "\n".join(section_lines).strip()
-            if len(section_text) > 20:
-                for fragment in section_text.split("\n\n"):
-                    fragment = fragment.strip().strip("*").strip()
-                    if 15 < len(fragment) < 300:
-                        sid = _seed_id(fragment, journal_file.name)
+            if section_lines:
+                section_text = "\n".join(section_lines).strip()
+                if len(section_text) > 20:
+                    for fragment in section_text.split("\n\n"):
+                        fragment = fragment.strip().strip("*").strip()
+                        if 15 < len(fragment) < 300:
+                            sid = _seed_id(fragment, journal_file.name)
+                            if sid not in existing_ids:
+                                seed = _make_seed_dict(
+                                    text=fragment,
+                                    source_type="journal_brewing",
+                                    source_path=source_path,
+                                    emotional_tags=fm.get("mood", "").split(","),
+                                    color=fm.get("color", []),
+                                    sound=fm.get("sound", ""),
+                                    threads=fm.get("threads", "").split(","),
+                                    now_fn=now_fn,
+                                )
+                                new_seeds.append(seed)
+                                existing_ids.add(sid)
+
+        # Source 3: prose heuristic extraction
+        if use_prose:
+            # For individual journal files, scan the body text directly
+            prose_seeds = _extract_prose_seeds(body_text, source_path)
+            for ps in prose_seeds:
+                sid = _seed_id(ps["text"], journal_file.name)
+                if sid not in existing_ids:
+                    seed = _make_seed_dict(
+                        text=ps["text"],
+                        source_type="journal_prose",
+                        source_path=source_path,
+                        emotional_tags=fm.get("mood", "").split(","),
+                        color=fm.get("color", []),
+                        sound=fm.get("sound", ""),
+                        threads=fm.get("threads", "").split(","),
+                        now_fn=now_fn,
+                        confidence=ps["extraction_confidence"],
+                    )
+                    new_seeds.append(seed)
+                    existing_ids.add(sid)
+
+            # For journal.md files, also parse inline entries
+            if journal_file.name == "journal.md":
+                inline_entries = _parse_journal_md_entries(content)
+                for date_label, entry_body in inline_entries:
+                    if not entry_body:
+                        continue
+                    prose_seeds = _extract_prose_seeds(entry_body, source_path)
+                    for ps in prose_seeds:
+                        # Use date_label in the source to disambiguate same-text seeds
+                        disambig = f"{journal_file.name}:{date_label}"
+                        sid = _seed_id(ps["text"], disambig)
                         if sid not in existing_ids:
-                            seed = {
-                                "id": sid,
-                                "text": fragment,
-                                "created_at": _now(cfg),
-                                "source_type": "journal_brewing",
-                                "source_path": f"{jdir.name}/{journal_file.name}",
-                                "emotional_tags": fm.get("mood", "").split(","),
-                                "color": fm.get("color", []),
-                                "sound": fm.get("sound", ""),
-                                "threads": fm.get("threads", "").split(","),
-                                "status": "incubating",
-                                "incubation_start": _now(cfg),
-                                "activation_date": None,
-                                "archive_reason": None,
-                                "medium_approaches": None,
-                                "selected_medium": None,
-                                "output_path": None,
-                                "synthesis_source_entries": [],
-                                "personality_alignment": None,
-                            }
+                            seed = _make_seed_dict(
+                                text=ps["text"],
+                                source_type="journal_prose",
+                                source_path=source_path,
+                                emotional_tags=fm.get("mood", "").split(","),
+                                color=fm.get("color", []),
+                                sound=fm.get("sound", ""),
+                                threads=fm.get("threads", "").split(","),
+                                now_fn=now_fn,
+                                confidence=ps["extraction_confidence"],
+                            )
                             new_seeds.append(seed)
+                            existing_ids.add(sid)
 
     if dry_run:
         return {"dry_run": True, "new_seeds_found": len(new_seeds), "seeds": new_seeds}
@@ -577,6 +836,17 @@ def main():
     # extract
     p_extract = sub.add_parser("extract", help="Scan journals for new seeds")
     _add_common_flags(p_extract)
+    p_extract.add_argument(
+        "--source",
+        default="all",
+        choices=["all", "frontmatter", "brewing", "prose"],
+        help=(
+            "Which extraction method to use (default: all). "
+            "frontmatter = YAML seed: field, "
+            "brewing = configurable section, "
+            "prose = body text heuristics"
+        ),
+    )
 
     # review
     p_review = sub.add_parser("review", help="Show seeds ready for activation review")
@@ -618,7 +888,7 @@ def main():
     medium_choices = build_medium_choices(cfg)
 
     if args.command == "extract":
-        result = extract(cfg, dry_run=args.dry_run)
+        result = extract(cfg, dry_run=args.dry_run, source=args.source)
     elif args.command == "review":
         result = review(cfg)
     elif args.command == "stats":
