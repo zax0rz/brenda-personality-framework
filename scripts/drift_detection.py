@@ -100,15 +100,39 @@ def parse_banned_phrases(voice_content: str) -> list[tuple[str, bool, Optional[r
     """
     Extract banned phrases from VOICE.md content.
 
-    Looks for sections titled 'Banned', 'Banned Phrases', or 'Never Say'
-    (case-insensitive). Each line is a banned phrase.
+    Extracts banned phrases from VOICE.md content from two sources:
+    1. YAML frontmatter `banned_phrases:` list
+    2. Markdown sections titled 'Banned', 'Banned Phrases', 'Never Say', etc.
     Lines starting with 'regex:' are treated as regular expression patterns.
 
     Returns list of (raw_string, is_regex, compiled_pattern_or_None).
     """
     phrases: list[tuple[str, bool, Optional[re.Pattern[str]]]] = []
-    in_section = False
 
+    # Source 1: YAML frontmatter banned_phrases list
+    in_frontmatter = False
+    fm_lines: list[str] = []
+    for line in voice_content.splitlines():
+        if stripped_line := line.strip():
+            if line.strip() == "---":
+                if in_frontmatter:
+                    break
+                in_frontmatter = True
+                continue
+            if in_frontmatter:
+                fm_lines.append(line)
+
+    for line in fm_lines:
+        stripped = line.strip()
+        if stripped.startswith("banned_phrases:"):
+            continue
+        if stripped and stripped.startswith("- "):
+            phrase = stripped[2:].strip().strip('"')
+            if phrase:
+                phrases.append((phrase, False, None))
+
+    # Source 2: Markdown sections
+    in_section = False
     section_headers = ["banned", "banned phrases", "never say", "do not say", "prohibited phrases"]
 
     for line in voice_content.splitlines():
@@ -120,7 +144,6 @@ def parse_banned_phrases(voice_content: str) -> list[tuple[str, bool, Optional[r
             continue
 
         if in_section and stripped and not stripped.startswith("#"):
-            # Skip empty lines and comments within the section
             if stripped.startswith("- ") or stripped.startswith("* "):
                 stripped = stripped[2:]
 
@@ -153,9 +176,17 @@ def parse_voice_exemplars(voice_content: str) -> list[str]:
     current_example: list[str] = []
 
     section_headers = [
-        "good", "examples", "voice exemplars", "✅ good",
+        "good", "voice exemplars", "✅ good",
         "example output", "sample output", "do say",
     ]
+    # Headers that START collecting but require a ✅ Good sub-header
+    parent_headers = ["tone examples", "examples", "voice examples"]
+    # Headers that stop collecting (bad examples, etc.)
+    stop_headers = ["bad", "❌ bad", "avoid", "don't say", "do not say", "never say"]
+
+    in_parent = False
+    in_section = False
+    current_example: list[str] = []
 
     for line in voice_content.splitlines():
         stripped = line.strip()
@@ -163,32 +194,83 @@ def parse_voice_exemplars(voice_content: str) -> list[str]:
 
         if header_match:
             header_text = stripped.lstrip("# ").strip().lower()
-            # Remove emoji for matching
             clean_header = re.sub(r"[^\w\s]", "", header_text).strip()
 
-            is_section = any(
+            # Check if this header stops collection
+            is_stop = any(
+                clean_header == re.sub(r"[^\w\s]", "", h).strip()
+                for h in stop_headers
+            )
+            if is_stop and in_section:
+                # Save current example and stop
+                block = "\n".join(current_example).strip()
+                if block:
+                    exemplars.append(block)
+                current_example = []
+                in_section = False
+                continue
+
+            # Check if this is a parent section (e.g. "## Tone Examples")
+            is_parent = any(
+                clean_header == re.sub(r"[^\w\s]", "", h).strip()
+                for h in parent_headers
+            )
+            if is_parent:
+                # Save any accumulated example
+                if in_section and current_example:
+                    block = "\n".join(current_example).strip()
+                    if block:
+                        exemplars.append(block)
+                    current_example = []
+                in_parent = True
+                in_section = False
+                continue
+
+            # Check if this is a direct section match (e.g. "### ✅ Good")
+            is_section_match = any(
                 clean_header == re.sub(r"[^\w\s]", "", h).strip()
                 for h in section_headers
             )
-            # Also check if the header CONTAINS a section keyword
-            if not is_section:
-                is_section = any(
+            # Also check header CONTAINS keywords
+            if not is_section_match:
+                is_section_match = any(
                     kw in clean_header
-                    for kw in ("good example", "voice example", "exemplar", "✅")
+                    for kw in ("good example", "voice example", "exemplar")
                 )
 
+            if is_section_match and (in_parent or not in_section):
+                # Save current example
+                if in_section and current_example:
+                    block = "\n".join(current_example).strip()
+                    if block:
+                        exemplars.append(block)
+                    current_example = []
+                in_section = True
+                in_parent = False
+                continue
+
+            # Any other header: save and reset
             if in_section and current_example:
                 block = "\n".join(current_example).strip()
                 if block:
                     exemplars.append(block)
                 current_example = []
-
-            in_section = is_section
+            in_section = False
+            in_parent = False
             continue
 
         if in_section:
-            # Split on multiple consecutive blank lines to separate examples
-            if not stripped and current_example and current_example[-1] == "":
+            # Split on bullet items or consecutive blank lines
+            if stripped.startswith(("- ", "* ")):
+                # Save previous example if any
+                if current_example:
+                    block = "\n".join(current_example).strip()
+                    if block:
+                        exemplars.append(block)
+                    current_example = []
+                # Start new example (strip the bullet prefix)
+                current_example = [stripped[2:].strip()]
+            elif not stripped and current_example and current_example[-1] == "":
                 # Consecutive blank = new example
                 block = "\n".join(current_example).strip()
                 if block:
