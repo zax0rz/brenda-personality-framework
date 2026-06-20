@@ -10,9 +10,13 @@ The reviewer was given full access to all architecture docs, example files, and 
 
 ## Framing: SEPL grounding
 
-The four-layer architecture (SOUL / VOICE / PERSONALITY / RELATIONSHIPS) plus the journal-synthesis loop was originally framed as a *personality persistence* design. A working reference for the safety half of the system was later grounded in the **SEPL paper** (Self-Evolution Protocol Layer — *Reflect → Select → Improve → Evaluate → Commit*) — see `architecture.md` → Safety: the anchor, the gate, negative space for the implementation.
+The four-layer architecture (SOUL / VOICE / PERSONALITY / RELATIONSHIPS) plus the journal-synthesis loop was originally framed as a *personality persistence* design. A working reference for the safety half of the system is grounded in the **Autogenesis Protocol** (Zhang et al., NTU + Stanford + Princeton + CityU HK + USTC, May 2026; arXiv:2604.15034) — specifically its **Self Evolution Protocol Layer (SEPL)**, the *Reflect → Select → Improve → Evaluate → Commit* closed-loop operator interface for proposing, assessing, and committing improvements with auditable lineage and rollback. See `architecture.md` → Safety: the anchor, the gate, negative space for the implementation. Project code: https://github.com/DVampire/Autogenesis.
 
-Per the data-integrity rule, the SEPL citation is included as a working anchor for the design pattern but has not been independently verified. Treat it as a direction-of-travel reference, not a verified paper. Flag for review if accuracy matters to your deployment.
+The Autogenesis paper's three core properties map directly onto the safety design:
+
+1. **Decoupling** — prompts, agents, tools, environments, and memory as independent resources rather than tightly coupled code. Maps onto the four-layer architecture (SOUL / VOICE / PERSONALITY / RELATIONSHIPS) as separable files with explicit mutation rules.
+2. **Safety & auditability** — strict version control and rollback to ensure every evolutionary step is traceable and reversible. Maps onto per-change git commits + `git revert <sha>` undoes exactly one evolution + the invariants ledger.
+3. **Formalism** — standardized operators (reflect, propose, verify) that convert heuristic modifications into a rigorous control loop. Maps onto the gate's two-tier evaluation (bright lines + coherence judge) as the Verify operator, and synthesis as Propose.
 
 The translation into this framework:
 
@@ -21,7 +25,7 @@ The translation into this framework:
 | Reflect | Journal entries | Daily raw intake |
 | Select | Synthesis | Weekly pattern extraction |
 | Improve | Personality file writes | Applied to the working tree |
-| Evaluate | **The gate** (bright lines + coherence judge) | Independent model, fails closed |
+| Evaluate | **The gate** (bright lines + coherence judge) | Independent model, fails closed (maps to SEPL's Verify operator) |
 | Commit | **Git transition** (per-change, reversible) | `git revert <sha>` undoes one accepted evolution |
 
 The first three stages were the original design. The back half — Evaluate + Commit — is the new safety layer, and is what makes autonomous self-modification safe enough to trust. The Sonnet reviews below cover the original four-layer design; the safety additions are reviewed in the post-review section.
@@ -318,7 +322,7 @@ The framework's conceptual architecture is sound. The layered separation of soul
 
 ## Post-Review: Safety Layer (added 2026-06-19)
 
-The four reviews above cover the original four-layer architecture. A safety layer was added in June 2026 — grounded in SEPL's Evaluate + Commit stages — addressing three structural risks the original design did not handle:
+The four reviews above cover the original four-layer architecture. A safety layer was added in June 2026 — grounded in the **Autogenesis paper's** Self Evolution Protocol Layer (Zhang et al. 2026, arXiv:2604.15034) — addressing three structural risks the original design did not handle:
 
 ### Risk 1: Self-editing the standard
 

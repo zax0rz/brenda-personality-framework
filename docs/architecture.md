@@ -78,7 +78,7 @@ conversations & experiences
 
 The loop is what makes persistence work. Without it, you just have files that sit there.
 
-A reference implementation of this loop is grounded in the **SEPL paper** (Self-Evolution Protocol Layer — *Reflect → Select → Improve → Evaluate → Commit*). The first three stages (Reflect/Select/Improve) are informal in this framework — they happen through journal writing, weekly synthesis, and the agent's own self-tend. The back half (Evaluate and Commit) is what makes autonomous self-modification safe enough to trust, and is implemented as a separate safety layer described below. (SEPL citation per opus/architect note, 2026-06-19; the paper reference is included as a working anchor for the design pattern but has not been independently verified — flag for review if accuracy matters to your deployment.)
+A reference implementation of this loop is grounded in the **Autogenesis Protocol** (Zhang et al., NTU + Stanford + Princeton + CityU HK + USTC, May 2026; arXiv:2604.15034). Specifically its **Self Evolution Protocol Layer (SEPL)** — the *Reflect → Select → Improve → Evaluate → Commit* closed-loop operator interface for proposing, assessing, and committing improvements with auditable lineage and rollback. The first three stages (Reflect/Select/Improve) are informal in this framework — they happen through journal writing, weekly synthesis, and the agent's own self-tend. The back half (Evaluate and Commit) is what makes autonomous self-modification safe enough to trust, and is implemented as a separate safety layer described below. (Project code: https://github.com/DVampire/Autogenesis — public.)
 
 ## Separation of Concerns
 
@@ -128,8 +128,8 @@ The weekly personality updates proposed by synthesis don't become permanent when
 
 - **ε (Evaluate)** — two tiers:
   - *Deterministic bright lines* from an invariants file: no SOUL edits, no un-banning a SOUL-level phrase, no PII, no unsourced date-bound family claims. These auto-fail with no model judgment.
-  - *Coherence judge*: an **independent model** (deliberately different from the agent's own model — the judge must not rubber-stamp the agent's drift) reads the diff against SOUL.md and rules pass/fail. Fails closed (errors/timeouts = reject).
-- **κ (Commit)** — passers get `git add`-ed (only the specific changed files, not a blanket commit) and committed as one reversible transition. Failures get `git checkout HEAD`'d back. Git *is* the versioned registry — no new datastore, no new failure mode.
+  - *Coherence judge*: an **independent model** (deliberately different from the agent's own model — the judge must not rubber-stamp the agent's drift) reads the diff against SOUL.md and rules pass/fail. Fails closed (errors/timeouts = reject). This maps to SEPL's *Verify* operator, which the Autogenesis paper specifies as auditable (every evaluation step logged with provenance) and conservative-fail (no silent acceptances).
+- **κ (Commit)** — passers get `git add`-ed (only the specific changed files, not a blanket commit) and committed as one reversible transition. Failures get `git checkout HEAD`'d back. Git *is* the versioned registry — no new datastore, no new failure mode. This maps to SEPL's *Commit* operator with full versioned lineage; the Autogenesis paper specifically calls out "strict version control and rollback" as a core property of the safety/auditability guarantee.
 
 **Rollback:** any single accepted evolution is one commit, so `git revert <sha>` undoes exactly one transition. This is what turns "hard to fix" into "trivially reversible." The whole point is that self-rewriting is safe *because* it's reversible per-change.
 

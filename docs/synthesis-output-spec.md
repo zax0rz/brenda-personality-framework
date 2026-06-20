@@ -306,7 +306,7 @@ Journal entries that have been cited in a synthesis output should have `synthesi
 
 ## Synthesis as Input to the Evolution Gate
 
-The synthesis output above is *not* a direct write to PERSONALITY.md. It is an input — the proposed changes — to a separate safety step (Evaluate + Commit, modeled on the SEPL back half). The reference implementation runs synthesis and the gate together in one atomic block, because the gate must see *complete, fresh* writes to evaluate them as a unit.
+The synthesis output above is *not* a direct write to PERSONALITY.md. It is an input — the proposed changes — to a separate safety step (Evaluate + Commit, modeled on the **Autogenesis paper's** Self Evolution Protocol Layer; Zhang et al. 2026, arXiv:2604.15034). The reference implementation runs synthesis and the gate together in one atomic block, because the gate must see *complete, fresh* writes to evaluate them as a unit.
 
 **Why atomic:**
 
