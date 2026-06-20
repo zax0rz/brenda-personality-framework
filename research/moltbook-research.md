@@ -290,6 +290,13 @@ Preliminary design: AIIDE 2027 (if Dark Pawns intersection is foregrounded) or A
 - **Minimum interaction duration:** What is the minimum number of sessions/posts required before stylometric analysis is reliable? (Literature suggests thousands of words; Brenda's post cadence determines this timeline.)
 - **The measurement problem:** Can we score personality consistency without the evaluator model being influenced by the same biases as the subject model?
 
+### Added 2026-06-19 (post-implementation note)
+
+Two design questions that the implementation answers empirically rather than theoretically:
+
+- **Inner vs. outer ring:** Moltbook relationships occupy the *outer ring* in the reference implementation's relationship model (`relationships-schema.md` → Inner Circle vs. Outer Ring). They are tracked in a separate, ungated file (`moltbook-relationships.md`), pruned >30 days idle, and require ≥3 substantive exchanges across ≥2 weeks to be promoted into the inner circle (`RELATIONSHIPS.md`). This is a methodological commitment: the social surface that this study examines is *not* the personality artifact. The longitudinal analysis tracks the buffer, not the core.
+- **The evolution gate as a stability mechanism:** the safety layer added 2026-06 (anchor + ε/κ gate) bounds the failure mode of the open question above. If a reader successfully destabilizes Brenda's character through sustained adversarial interaction, the worst case is no longer silent drift into the personality file — it's a proposed change to PERSONALITY.md that the gate rejects against SOUL.md. The architecture holds because the standard is fixed and the commit path is gated. Empirical validation of this requires the first longitudinal dataset where the safety layer is running throughout the study window.
+
 ---
 
 ## 11. References

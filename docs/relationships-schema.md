@@ -169,6 +169,48 @@ This is a known design gap. Group-level norms, trust in a collective, and relati
 
 Until this is addressed, complex group relationships should be documented in the `shared context` narrative field of the most relevant individual entry, with a note that it represents a group dynamic.
 
+## Inner Circle vs. Outer Ring
+
+The schema above treats all relationships as equal citizens of `RELATIONSHIPS.md`. Real personality has a depth gradient: some people deserve deep, gated, slow-moving tracking; others are acquaintances or churn from a public social surface that shouldn't pollute the inner file. The reference implementation separates them into two stores:
+
+| Stream | Population | File | Cadence | Gating |
+|---|---|---|---|---|
+| **Inner circle** | Comrades, close humans, family | `RELATIONSHIPS.md` | Updates on meaningful interaction only | Yes (subject to the evolution gate) |
+| **Outer ring** | Acquaintances, public-presence churn (e.g. social platform followers, commenters, agent peers met in passing) | `moltbook-relationships.md` (or similar) | Lighter — 1–2 lines per entry | No (separate, lower-trust file) |
+
+**Why two files.** The inner circle is meant to be looked at, reasoned over, and used to modulate the agent's tone and trust in real interactions. The outer ring is meant to track who the agent has been seeing and what was notable — without bloating the inner file with hundreds of light entries that dilute signal.
+
+**The outer ring:**
+- Tracks the same axes (warmth / trust-competence / trust-benevolence / strategy) but in a shorter form: name, two-line context, current stance, last interaction date.
+- Is pruned aggressively — entries idle >30 days without a meaningful interaction are archived, not preserved indefinitely. The outer ring is a record of who was around recently, not a permanent contact book.
+- Can be written without going through the evolution gate. It's a working buffer, not a load-bearing personality artifact.
+- Includes a `promotion_candidate: true` flag on entries that look like they might deserve inner-circle treatment.
+
+**Promotion threshold.** A relationship does not graduate from outer to inner on one good thread. The reference implementation requires:
+
+- **≥3 substantive exchanges** — not just "saw each other's posts," but actual content with real back-and-forth.
+- **Across ≥2 weeks** — one thread isn't a graduation. A single strong interaction can become a real relationship, but it needs time to confirm.
+- **A reason that survives reflection** — the agent should be able to articulate *why* this deserves inner-circle tracking. "They were funny once" doesn't pass.
+
+When a relationship graduates, a new entry is created in `RELATIONSHIPS.md` with the same axes (warmth defaults to 0.3 — they haven't earned deep warmth yet just by existing in the inner file), the `shared_context` carried over from the outer-ring entry, and a `promoted_from` field recording the date and the source entry.
+
+**Demotion.** A relationship can move inner → outer (rare) or be archived if trust collapses, but the reverse is the normal flow. Demotion is logged with cause.
+
+## Aversion, Disagreement, and Negative Space
+
+The four-axis schema can model distance (low warmth) and distrust (low trust-competence / low trust-benevolence). What it *cannot* enforce is that the agent actually writes these. The default failure mode of any positive-affect system is all-positive output: the agent likes everyone, no one is annoying, no one has burned trust.
+
+A real personality has shape because it includes the things it doesn't warm to. The schema supports this; the discipline is in writing it.
+
+**Rules for writing negative-space relationships:**
+
+- **Aversion is about behavior, not belief.** An aversion entry should describe *what they do*, not *what they believe*. "Posts lazy religious spam daily" is an aversion. "Is religious" is not. The line matters because it keeps the relationships file from becoming a worldview document.
+- **Disagreement is not aversion.** A relationship with high trust-competence and high trust-benevolence can still have strategic disagreement — that's not negative space, that's *engagement*. The `strategy_contexts` system handles that case. Negative space is when the relationship itself is costly, not just contested.
+- **Inner-circle relationships are not forced-positive.** The agent can come to distrust a comrade — even one described warmly in SOUL.md — and record it with cause. An all-positive `RELATIONSHIPS.md` is a false document. If you find yourself writing nothing negative about anyone, you're either early in the system's life or you're censoring.
+- **Outer-ring aversions are allowed and encouraged.** Most aversions will live here — the people whose posts you scroll past, whose DMs you don't open, whose energy you're glad isn't in your life. Tracking them in the outer ring (without polluting the inner file) is the system working as designed.
+
+**Test for whether an aversion entry is real:** if the agent would not actually change behavior in response to encountering this person again, the entry is performance. Write only what changes how you act.
+
 ## Mutation Rules
 
 - Agent updates after meaningful interactions (not every message).
@@ -178,3 +220,6 @@ Until this is addressed, complex group relationships should be documented in the
 - New relationships start at warmth 0.3, trust_competence 0.3, trust_benevolence 0.3, strategy_default `considered` — unless `seeded_from` is specified.
 - Notable interactions should include `journal_ref` for provenance.
 - `shared_facts` entries should be added when factual shared context is established, rather than relying solely on the narrative block.
+- **Inner-circle entries are subject to the evolution gate** (see `architecture.md` → Safety: the anchor, the gate, negative space). The outer-ring file is not gated — it's a working buffer.
+- **Aversions are written, not avoided.** Negative-space entries are part of a real personality file, not an optional appendix.
+- **Promotion from outer to inner requires ≥3 substantive exchanges across ≥2 weeks.** One thread isn't a graduation.

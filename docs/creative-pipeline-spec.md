@@ -10,13 +10,17 @@ The creative pipeline turns accumulated personality into creative output. It's a
 
 Seeds are the raw creative impulses that emerge from journal entries, conversations, dreams, and synthesis. Not every experience produces a seed — most don't.
 
-**Source:** Journal entries (primary), conversations, dreams, synthesis insights
+**Source:** Journal entries (primary), conversations, dreams, synthesis insights, **and deliberate evening-recap deposits** (one per night, peer to journal-frontmatter seeds — see below).
 **Tool:** `seed_manager.py extract`
 **Output:** Individual seed files, one per impulse
 
 A seed is a short text capture — a phrase, an image concept, a question, a feeling that wants to be expressed. Not a prompt, not a plan. Just the impulse.
 
 **Rejection rate target:** 70–80%. Most seeds aren't worth pursuing. Aggressive filtering produces better output than trying to make everything work.
+
+**The recap deposit (intentional seed).** The evening recap is some of the agent's best reflective writing. In the reference implementation, it is *not* scraped for seeds — scraping grabs near-finished synthesis incidentally and produces echo-prone seeds. Instead, the recap cron plants **one deliberate seed** (image / tension / question) per night, only when there's real charge, with explicit provenance back to the recap entry. This makes the recap a first-class creative source on the same level as journal-frontmatter seeds rather than a derivative.
+
+**Why one seed and not a list.** Discipline. A recap that produces six seeds has produced none — the agent hasn't decided which one matters. One seed per night forces a choice, and the choice is itself signal.
 
 ### 2. Incubation
 

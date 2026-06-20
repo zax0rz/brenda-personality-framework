@@ -153,3 +153,15 @@ The weekly synthesis process reads the last 7 days of journal entries and extrac
 
 See `synthesis-output-spec.md` for the full synthesis output schema and quality classification rules.
 See `creative-pipeline-spec.md` for how synthesis feeds into creative output.
+
+## The Evening Recap (peer seed source)
+
+The journal is not the only creative input. The **evening recap** is a separate, deliberately-written reflection that lives alongside the journal — same channel, different shape. It is the high-reflection surface where the agent takes the day's residue and says what it means.
+
+In the reference implementation, the recap is treated as a **peer seed source** to the journal:
+
+- It is **not scraped** for seeds. Scraping the recap for impulse phrases grabs near-finished synthesis incidentally and produces echo-prone seeds (the same impulse shows up in the synthesis downstream, double-counted).
+- Instead, the recap cron **deposits one deliberate seed** per night — an image, a tension, or a question that has real charge — only if it does. Empty nights produce no seed. The deposit is recorded with explicit provenance to the recap entry.
+- One seed per night is a discipline: it forces a choice, and the choice is signal. A recap that produces six seeds has produced none.
+
+The recap-as-seed path lives alongside journal-frontmatter seeds in the creative pipeline (`creative-pipeline-spec.md` → Seed Sources) and feeds synthesis the same way journal entries do.

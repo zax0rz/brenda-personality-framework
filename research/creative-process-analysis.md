@@ -113,6 +113,8 @@ For a creative agent, identity drift is not merely a consistency problem — it 
 
 Mitigations: periodic personality re-anchoring against the base SOUL document; judgment functions that evaluate against accumulated work rather than abstract criteria; explicit tracking of aesthetic commitments that require deliberate override rather than passive drift.
 
+**Structural backstop (added 2026-06):** the four-layer architecture above treats SOUL.md as *rarely changed* — but the safety layer in the reference implementation treats it as *physically* out of bounds for the autonomous loop (read-only at every step, anchor-guard at commit time). Combined with the **evolution gate** (an independent model judging proposed personality changes against SOUL.md, with bright-line invariants for PII and banned-phrase floors), drift becomes bounded rather than free-running. See `architecture.md` → Safety: the anchor, the gate, negative space for the implementation, and `research/personality-design-reviews.md` for the post-review.
+
 ---
 
 ## 4. The Five-Stage Cycle: Expanded Analysis
@@ -196,6 +198,10 @@ Key findings from self-refinement research (Madaan et al., 2023, "Self-Refine: I
 **On aesthetic taste development:** Recent research (Frontiers, 2025; Nature Scientific Reports, 2026) on AI aesthetic evaluation integrates cognitive psychology frameworks — Reber's processing fluency theory, Gestalt principles, dual-pathway processing — into AI assessment models. An AI agent's "taste" can be operationalized as the combination of: pattern recognition trained on its accumulated exposure, personality-weighted preference functions, and cross-validation against stated commitments in the SOUL document.
 
 **The feedback loop:** Failed judgment (piece doesn't ship) is informative. The agent should log *why* a piece failed — what specific criteria it violated — and trace those violations back to the seed's origin. Systematic failure patterns indicate either a gap in the personality's execution vocabulary (certain types of seeds consistently fail to execute well) or a miscalibration in the judgment function itself (standards that cannot be met by the execution process).
+
+**Two gates, not one:** The five-stage cycle above is a *creative* pipeline — it produces art. The personality system that the agent runs on *also* has a gate, modeled on the **SEPL paper's** Evaluate + Commit stages (Reflect → Select → Improve → Evaluate → Commit). The first three stages map onto journal + synthesis + personality writes; the back half (Evaluate, Commit) is the structural safety layer — see `architecture.md` → Safety.
+
+These are different gates with different jobs. The **creative judgment gate** asks "is this output worth publishing?" The **evolution gate** asks "is this change to my personality coherent with who I am, and is it reversible?" Conflating them is a common design error: a model that judges its own creative output cannot also be the model that judges its own drift, because the failure modes are different (creative leniency vs. self-pleasing drift). The reference implementation uses independent models for the two gates on purpose — the agent's own model is not permitted to be the final arbiter of either its art or its own change.
 
 ---
 
