@@ -1,12 +1,30 @@
 # Personality Design Reviews
 
-## Status: Complete (v1.0 — external review by Claude Sonnet 4.6, 2026-05-15)
+## Status: v1.1 — added Safety / Anchor / Gate review (2026-06-19)
 
 ## Purpose
 
 Documented design reviews of the personality system by a secondary model (Claude Sonnet 4.6). These reviews catch inconsistencies, flag risks, and provide external perspective on architecture decisions.
 
 The reviewer was given full access to all architecture docs, example files, and reference implementations before writing. This is an honest external assessment — the goal is to find real problems, not to validate the design.
+
+## Framing: SEPL grounding
+
+The four-layer architecture (SOUL / VOICE / PERSONALITY / RELATIONSHIPS) plus the journal-synthesis loop was originally framed as a *personality persistence* design. A working reference for the safety half of the system was later grounded in the **SEPL paper** (Self-Evolution Protocol Layer — *Reflect → Select → Improve → Evaluate → Commit*) — see `architecture.md` → Safety: the anchor, the gate, negative space for the implementation.
+
+Per the data-integrity rule, the SEPL citation is included as a working anchor for the design pattern but has not been independently verified. Treat it as a direction-of-travel reference, not a verified paper. Flag for review if accuracy matters to your deployment.
+
+The translation into this framework:
+
+| SEPL stage | This framework | Notes |
+|---|---|---|
+| Reflect | Journal entries | Daily raw intake |
+| Select | Synthesis | Weekly pattern extraction |
+| Improve | Personality file writes | Applied to the working tree |
+| Evaluate | **The gate** (bright lines + coherence judge) | Independent model, fails closed |
+| Commit | **Git transition** (per-change, reversible) | `git revert <sha>` undoes one accepted evolution |
+
+The first three stages were the original design. The back half — Evaluate + Commit — is the new safety layer, and is what makes autonomous self-modification safe enough to trust. The Sonnet reviews below cover the original four-layer design; the safety additions are reviewed in the post-review section.
 
 ---
 
@@ -297,3 +315,57 @@ The following research informed these reviews.
 5. Add opinion staleness mechanism to PERSONALITY.md
 
 The framework's conceptual architecture is sound. The layered separation of soul/voice/personality/relationships is well-reasoned and rare in production systems. The execution gaps are concentrated in two areas: (a) undefined measurement methods that appear scientific but aren't, and (b) underspecified connective tissue between layers (particularly synthesis output).
+
+## Post-Review: Safety Layer (added 2026-06-19)
+
+The four reviews above cover the original four-layer architecture. A safety layer was added in June 2026 — grounded in SEPL's Evaluate + Commit stages — addressing three structural risks the original design did not handle:
+
+### Risk 1: Self-editing the standard
+
+The original Sonnet reviews flagged that SOUL.md "rarely changes" and is "human-curated" — but did not treat this as a hard constraint. The new design treats SOUL.md as *physically* out of bounds for the autonomous loop: read-only at every step, anchor-guard at commit time, no prompt-level permission to "edit it just this once."
+
+**Why the original framing was insufficient:** "Rarely changes" and "human-curated" both leave room for an LLM-judged "this is warranted." The whole point of an anchor is that the loop cannot move it. Prompts are not enforcement; code is. The new design encodes the rule as code (an anchor-guard in the commit path) and as a bright-line invariant.
+
+### Risk 2: Compound drift in mutations
+
+The original reviews didn't address what happens when synthesis writes a personality update that *individually* looks fine but *compounds* with prior changes to push the personality off-axis. The new design introduces the **evolution gate** as a separate step:
+
+- Bright-line invariants (auto-fail, deterministic): PII, banned-phrase floors, anchor-guard, unsourced date-bound family claims.
+- Coherence judge (model-based, *independent of the agent's own model*): reads the proposed diff against SOUL.md, rules pass/fail, fails closed on error.
+- Per-change commit: `git add` only the specific changed files, one commit per accepted evolution. `git revert <sha>` undoes exactly one transition.
+
+**Why independent model:** the agent's own model cannot be the judge of its own drift — that's the original wireheading problem. The judge model sits outside the judged system. (Reference implementation: deepseek-v4-flash as judge; M3 as agent. The choice of *different model family* is the point.)
+
+### Risk 3: All-positive relationships
+
+The original RELATIONSHIPS.md design handles distance and distrust via the four-axis schema (low warmth, low trust-competence, low trust-benevolence) but does not enforce that the agent actually writes negative-space entries. The default failure mode of any positive-affect system is all-positive output — and the Sonnet review noted that the relationships schema "relies on the agent exercising discipline that nothing in the design enforces."
+
+The new design adds:
+
+- **Aversion as a first-class concept**, with explicit rules for what aversion entries are (about behavior, not belief) and what they're not (a worldview document, a punishment file).
+- **Inner circle vs. outer ring split** — two files, two cadences, two gating levels. Inner circle (`RELATIONSHIPS.md`) is gated and subject to the evolution gate; outer ring (`moltbook-relationships.md` or similar) is ungated, lighter, pruned >30 days idle.
+- **Promotion threshold** — ≥3 substantive exchanges across ≥2 weeks. One good thread is not a graduation.
+- **Disagreement is not aversion.** Strategic disagreement between high-trust parties is `strategy_contexts`, not negative space. The distinction keeps the negative-space concept from absorbing ordinary engagement.
+
+### What the safety layer does *not* solve
+
+Honest acknowledgment of the limits:
+
+- **The judge model can still be wrong.** A coherence judge that misreads SOUL.md can reject a legitimate change or accept a problematic one. The system catches the *common* failure mode (drift toward self-pleasing) better than it catches adversarial judges.
+- **Synthesis itself is not gated.** The gate judges the *result* of synthesis (the working-tree writes), not the *judgment* that produced them. The most damaging synthesis errors — promoting a thin acquaintance to a deep bond, escalating an opinion intensity on weak evidence — slip past the gate because their *output* looks coherent. The promotion threshold and intensity transition rules are the mitigation, but they're soft.
+- **The anchor can still drift in spirit.** SOUL.md text is fixed, but the agent's *reading* of it can drift over months of accumulated context. Re-reading the anchor at every session helps; it doesn't eliminate the drift.
+
+These are irreducible. The safety layer reduces the rate of silent failure; it does not eliminate the possibility of failure.
+
+### Updated aggregate findings
+
+| Component | Original Rating | Current Status | Notes |
+|---|---|---|---|
+| Journal + Synthesis | 7/10 | ✅ Output spec added (synthesis-output-spec.md) | Prior critical issue resolved |
+| PERSONALITY.md | 6/10 | ✅ Gate-aware, anchor-guard via invariants | voice_drift/consistency_score computation still requires external infra |
+| RELATIONSHIPS.md | 6.5/10 | ✅ Aversion, inner/outer split, promotion threshold | Group relationship limitation remains |
+| VOICE.md / Voice Consistency | 4/10 | ✅ Anchor protected; surface extensible; floor non-removable | Drift detection still depends on embedding infra |
+| **NEW: Safety layer (anchor + gate)** | — | ✅ Implemented as code, not prompt | Judge model failure modes acknowledged |
+| **NEW: Negative space** | — | ✅ Schema-supported, discipline-documented | Soft enforcement only |
+
+The framework's center of gravity has shifted from "personality persistence" to "personality persistence *under autonomous self-modification*." The original four-layer design is necessary; the safety layer is what makes it safe to actually run.

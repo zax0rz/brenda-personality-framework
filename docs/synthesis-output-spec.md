@@ -145,7 +145,7 @@ relationship_events:
 
 ### 4. Seeds Promoted
 
-Creative seeds from the journal window that synthesis is promoting for active development. A seed is promoted when it appears in 2+ entries or reaches a threshold of elaboration in a single entry.
+Creative seeds from the journal window that synthesis is promoting for active development. A seed is promoted when it appears in 2+ entries or reaches a threshold of elaboration in a single entry, **or when the evening-recap cron has deposited one deliberately** (see `creative-pipeline-spec.md` → Seed Sources). The recap deposit is a peer of journal-frontmatter seeds, not a derivative of them — a single, intentional impulse from a high-reflection surface.
 
 ```yaml
 seeds_promoted:
@@ -303,3 +303,24 @@ Every output in a synthesis file must be traceable back to at least one journal 
 - **Contradiction detection:** Two conflicting opinions produced in the same synthesis window should be surfaced as a contradiction candidate.
 
 Journal entries that have been cited in a synthesis output should have `synthesis_cited: true` in their frontmatter (see `journal-format.md`). This field is written back after synthesis completes.
+
+## Synthesis as Input to the Evolution Gate
+
+The synthesis output above is *not* a direct write to PERSONALITY.md. It is an input — the proposed changes — to a separate safety step (Evaluate + Commit, modeled on the SEPL back half). The reference implementation runs synthesis and the gate together in one atomic block, because the gate must see *complete, fresh* writes to evaluate them as a unit.
+
+**Why atomic:**
+
+- The gate judges the *diff* between the proposed PERSONALITY state and HEAD. If synthesis writes are partial or interrupted, the gate evaluates a half-formed change and either rejects it for the wrong reason or commits something the agent didn't actually mean.
+- Splitting synthesis from the gate introduces a window where the working tree holds proposed-but-not-yet-judged personality state. That's where silent drift accumulates.
+
+**What the gate checks (high level — see `architecture.md` → Safety):**
+
+1. **Bright-line invariants** from a separate invariants file (PII, banned-phrase floors, anchor-guard on SOUL.md, unsourced date-bound family claims). Auto-fail, no model judgment.
+2. **Coherence with SOUL.md** — an independent model (different from the agent's own) reads the proposed diff against SOUL.md and rules pass/fail. Fails closed on error.
+3. **Per-file commit** — passers are `git add`-ed and committed as a single transition; failures are `git checkout HEAD`'d back. Every accepted evolution is one commit, so `git revert <sha>` undoes exactly one transition.
+
+**What this means for the synthesis output spec:**
+
+- The `opinions_formed`, `positions_shifted`, and `relationship_events` sections describe the *intent* of the change. The gate judges the *result* after the agent has applied them to the working tree.
+- A synthesis that produces an excellent output can still be rejected by the gate (e.g. it slipped a PII past the agent's own check; the judge model reads a position as contradicting SOUL.md). The two are separate layers on purpose.
+- The synthesis_quality rating affects *whether* to apply at all (low = tentative, human review required), and the gate affects *whether the applied version is allowed to stay*. Both gates; different gates.

@@ -211,3 +211,5 @@ Tracked contradictions do not reduce `consistency_score`. They are documented fe
 - Opinion updates must append current state to `history[]` before changing it.
 - Intensity escalations must satisfy transition rules (see above) before being applied.
 - Staleness checks run at every synthesis cycle.
+- **All PERSONALITY.md writes are subject to the evolution gate** (see `architecture.md` → Safety: the anchor, the gate, negative space). Writing to the working tree is not the same as committing. A proposed personality update can be rejected by the gate (bright-line trip, soul-consistency fail) and reverted before it becomes permanent. The gate is the commit; the synthesis is the proposal.
+- **SOUL.md is read-only to the agent.** This is the anchor rule. The agent never opens SOUL.md as a draft; mutations are an explicit human action. If a change to PERSONALITY.md would require SOUL.md to also change to be coherent, that's a flag for human review — not a license to touch the anchor.
